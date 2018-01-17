@@ -18,6 +18,7 @@
 #include <IRremoteESP8266.h>
 #include <IRsend.h>
 #include <IRrecv.h>
+#include <IRutils.h>
 
 
 const uint8_t modeAP = 0;
@@ -92,7 +93,7 @@ void setup() {
   delay(1000);
 
   // Startmeldung anzeigen
-  Serial.println("ESPmote v0.8");
+  Serial.println("ESPmote v1.0");
   Serial.println();
 
   // Prüfen, ob WLAN-Daten hinterlegt sind
@@ -173,36 +174,115 @@ void loop() {
   int packetSize = udpPort.parsePacket();
   if (packetSize > 0)
   {
-    Serial.printf("Received %d bytes from %s, port %d\n", packetSize, udpPort.remoteIP().toString().c_str(), udpPort.remotePort());
-    char packet[128];
-    int len = udpPort.read(packet, 128);
+    // Paket einlesen
+    char packet[512];
+    int len = udpPort.read(packet, 512);
     if (len > 0)
     {
       packet[len] = 0;
     }
+    //Serial.printf("Received %d bytes from %s, port %d\n", packetSize, udpPort.remoteIP().toString().c_str(), udpPort.remotePort());
+    //Serial.printf("UDP packet contents: %s\n", packet);
 
     // 3 Befehle werden unterstützt:
     // 1: HELO (Check, ob Gerät erreichbar ist)
-    // 2: RECV (IR-code einlesen und HEX-code zurücksenden)
+    // 2: RECV (IR-code einlesen und code zurücksenden)
     // 3: SEND <code> (IR-code senden)
     if (len >= 4)
     {
+      // HELO
       if (packet[0] == 'H' && packet[1] == 'E' && packet[2] == 'L' && packet[3] == 'O')
       {
         udpPort.beginPacket(udpPort.remoteIP(), udpPort.remotePort());
         udpPort.write("HELO\n");
         udpPort.endPacket();
       }
+      // RECV
       else if (packet[0] == 'R' && packet[1] == 'E' && packet[2] == 'C' && packet[3] == 'V')
       {
-        // TODO
+        // Empfänger aktivieren
+        irrecv.enableIRIn();
+
+        // Code einlesen
+        String result;
+        decode_results results;
+        while (true)
+        {
+          if (irrecv.decode(&results))
+          {
+            if (results.overflow)
+            {
+              Serial.println("Überlauf beim Empfangen!");
+              continue;
+            }
+            else
+            {
+              for (uint16_t i = 1; i < results.rawlen; i++)
+              {
+                uint32_t usecs;
+                for (usecs = results.rawbuf[i] * RAWTICK; usecs > UINT16_MAX; usecs -= UINT16_MAX)
+                {
+                  result += uint64ToString(UINT16_MAX);
+                  result += " 0 ";
+                }
+                result += uint64ToString(usecs, 10);
+                if (i < results.rawlen - 1)
+                {
+                  result += " ";  // ' ' not needed on the last one
+                }
+              }
+            }
+  
+            Serial.print("Fragmente eines IR-Codes empfangen: ");
+            Serial.println(result);
+  
+            udpPort.beginPacket(udpPort.remoteIP(), udpPort.remotePort());
+            udpPort.write(result.c_str());
+            udpPort.write("\n");
+            udpPort.endPacket();
+
+            break;
+          }
+          
+          yield();
+        }
+
+        // Empfänger wieder deaktivieren
+        irrecv.disableIRIn();
       }
+      // SEND <CODE>
       else if (packet[0] == 'S' && packet[1] == 'E' && packet[2] == 'N' && packet[3] == 'D')
       {
-        const char *code = &packet[5];
-        // TODO
+        // Code in int-array umwandeln
+        size_t numData = 0;
+        uint16_t rawData[128];
+        for (size_t i = 5; i < packetSize - 1; i++)
+        {
+          if (i == 5)
+          {
+            rawData[0] = atoi(&packet[5]);
+            numData++;
+          }
+          else if (packet[i] == ' ')
+          {
+            rawData[numData] = atoi(&packet[i + 1]);
+            numData++;
+          }
+        }
+
+        Serial.print("Sende ");
+        Serial.print(numData);
+        Serial.print(" Fragmente an Rohdaten: ");
+        for (size_t i = 0; i < numData; i++)
+        {
+          Serial.print(rawData[i]);
+          Serial.print(" ");
+        }
+        Serial.println();
+
+        // Danach per IRsend senden
+        irsend.sendRaw(rawData, numData, 38);
       }
     }
-    Serial.printf("UDP packet contents: %s\n", packet);
   }
 }
