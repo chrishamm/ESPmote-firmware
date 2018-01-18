@@ -24,6 +24,9 @@
 const uint8_t modeAP = 0;
 const uint8_t modeSTA = 1;
 
+const unsigned int receiverKhz = 36;    // TSOP4836 als Receiver (36kHz Bandpass)
+
+// Konfigurationsspeicher im EEPROM
 const uint32_t configMagic = 0x54FE93B0;
 
 struct ConfigData
@@ -36,7 +39,10 @@ struct ConfigData
 
 ConfigData config;
 
+// Geöffneter Port zur Kommunikation mit der App
 WiFiUDP udpPort;
+
+// Instanzen der IR-Bibliothek
 IRsend irsend(4);   // IR Sende-LED ist an Pin 4 (D2 @ NodeMCU) angeschlossen
 IRrecv irrecv(14);  // IR Empfänger ist an Pin 14 (D5 @ NodeMCU) angeschlossen
 
@@ -93,7 +99,7 @@ void setup() {
   delay(1000);
 
   // Startmeldung anzeigen
-  Serial.println("ESPmote v1.0");
+  Serial.println("ESPmote v1.1");
   Serial.println();
 
   // Prüfen, ob WLAN-Daten hinterlegt sind
@@ -115,6 +121,7 @@ void setup() {
   {
     Serial.println("WLAN-Konfiguration nicht vorhanden. Bitte geben Sie nun die WLAN-Daten ein.");
     Serial.println("Betriebsmodus: 0 - Access Point 1 - Station");
+    Serial.flush();
     config.mode = (readByte() == '1') ? modeSTA : modeAP;
     Serial.println("SSID:");
     readLine(config.ssid, sizeof(config.ssid));
@@ -281,7 +288,7 @@ void loop() {
         Serial.println();
 
         // Danach per IRsend senden
-        irsend.sendRaw(rawData, numData, 38);
+        irsend.sendRaw(rawData, numData, receiverKhz);
       }
     }
   }
